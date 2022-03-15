@@ -1,0 +1,108 @@
+--[==[ =========================================================================
+Kintastic2.Core.ObjUtils - Object utils
+=======================================
+
+Provides utils related to objects.
+
+# TABLE OF CONTENTS
+
+[[TOC]]
+
+# SYNOPSIS
+
+```lua
+local ObjUtils = require( "Kintastic2.Core.ObjUtils" )
+```
+]==]
+
+
+-- This module.
+local ObjUtils = { }
+
+
+-- Modules.
+local Introspection = require( "Kintastic2.Core.Introspection" )
+
+
+--[==[ =========================================================================
+# FUNCTIONS
+]==]
+
+
+--[==[ -----------------------------------------------------
+## ObjUtils.get_class
+
+Alias for `get_class` from [`Kintastic2.Core.Introspection`](`./Introspection.md`).
+]==]
+
+ObjUtils.get_class = Introspection.get_class
+
+
+--[==[ -----------------------------------------------------
+## ObjUtils.is_instance_of
+
+Alias for `is_instance_of` from [`Kintastic2.Core.Introspection`](`./Introspection.md`).
+]==]
+
+ObjUtils.is_instance_of = Introspection.is_instance_of
+
+
+--[==[ -----------------------------------------------------
+## ObjUtils.make_delegate
+
+```lua
+local f = ObjUtils.make_delegate( o, method_name )
+local f = ObjUtils.make_delegate( o, method_name, extra_arg1 )
+local f = ObjUtils.make_delegate( o, method_name, extra_arg1, extra_arg2 )
+local f = ObjUtils.make_delegate( o, method_name, extra_arg1, extra_arg2, … )
+```
+
+Creates a function that calls the provided method name of
+the provided object. All extra arguments passed to this
+function and all arguments passed to the function when it's
+called are passed to the method.
+
+This is useful to create a callback function.
+
+This handles `nil` arguments correctly.
+
+Example:
+
+```lua
+-- Same as: `local rv = o:some_method( "foo", "bar" )`
+local f = ObjUtils.make_delegate( o, "some_method", "foo" )
+local rv = f( "bar" )
+```
+]==]
+
+function ObjUtils.make_delegate( o, method_name, ... )
+   local n1 = select( "#", ... )
+   local args1 = { ... }
+
+   return function( ... )
+      local n2 = select( "#", ... )
+      local args2 = { ... }
+
+      local args = { }
+      local n = 0
+
+      for i = 1, n1 do
+         args[ n + i ] = args1[ i ]
+      end
+
+      n = n + n1
+
+      for i = 1, n2 do
+         args[ n + i ] = args2[ i ]
+      end
+
+      n = n + n2
+
+      return o[ method_name ]( o, table.unpack( args, 1, n ) )
+   end
+end
+
+
+-- ================================================================================
+
+return ObjUtils

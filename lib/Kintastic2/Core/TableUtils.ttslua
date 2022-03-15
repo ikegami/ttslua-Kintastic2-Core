@@ -1,0 +1,136 @@
+--[==[ =========================================================================
+Kintastic2.Core.TableUtils - Table utils
+========================================
+
+Provides utils related to both array-like and dictionary-like tables.
+
+# TABLE OF CONTENTS
+
+[[TOC]]
+
+# SYNOPSIS
+
+```lua
+local TableUtils = require( "Kintastic2.Core.TableUtils" )
+```
+]==]
+
+
+-- The module.
+local TableUtils = { }
+
+
+--[==[ =========================================================================
+# FUNCTIONS
+]==]
+
+
+--[==[ -----------------------------------------------------
+## TableUtils.copy
+
+```lua
+local copy = TableUtils.copy( tbl )
+```
+
+Returns a shallow copy of the provided table.
+]==]
+
+function TableUtils.copy( tbl )
+   local copy = { }
+   for k, v in pairs( tbl ) do
+      copy[k] = v
+   end
+
+   return copy
+end
+
+
+--[==[ -----------------------------------------------------
+## TableUtils.count
+
+```lua
+local function test( value, index )
+   return boolean
+end
+
+local count = TableUtils.count( tbl )
+local count = TableUtils.count( test, tbl )
+```
+
+Returns the number of matching elements in a table.
+
+The test callback function is called with the value and key
+of an element as arguments (in that order). Only the
+elements for which this function return a true value are
+counted.
+
+If no test callback is provided, returns the number of
+elements in the table. For array-like tables, it's more
+efficient to use the `#` operator to obtain the number of
+elements.
+]==]
+
+function TableUtils.count( ... )
+   local n = select( "#", ... )
+
+   local test, tbl
+   if n == 1 then
+      test = function( v, k ) return true end
+      tbl  = select( 1, ... )
+   else
+      test = select( 1, ... )
+      tbl  = select( 2, ... )
+   end
+
+   local count = 0
+   for k, v in pairs( tbl ) do
+      if test( v, k ) then
+         count = count + 1
+      end
+   end
+
+   return count
+end
+
+
+--[==[ -----------------------------------------------------
+## TableUtils.map
+
+```lua
+local function transform( value, key )
+   return new_value
+end
+
+local modified = TableUtils.map( transform, tbl )
+```
+
+Returns a table that's a copy of the provided table, but
+with a transformation applied to each value.
+
+The transformation callback function is called with the
+value and key of an element as arguments (in that order).
+
+Example:
+
+```lua
+-- { "DOG", "CAT" }
+local modified = TableUtils.map(
+   |s|string.upper(s),
+   { "dog", "cat" }
+)
+```
+]==]
+
+function TableUtils.map( transform, tbl )
+   local transformed = { }
+   for k, v in pairs( tbl ) do
+      transformed[k] = transform( v, k )
+   end
+
+   return transformed
+end
+
+
+-- ================================================================================
+
+return TableUtils

@@ -1,0 +1,184 @@
+--[==[ =========================================================================
+Kintastic2.Core.StrUtils - String utils
+=======================================
+
+Provides utils related to strings.
+
+# TABLE OF CONTENTS
+
+[[TOC]]
+
+# SYNOPSIS
+
+```lua
+local StrUtils = require( "Kintastic2.Core.StrUtils" )
+```
+]==]
+
+
+-- This module.
+local StrUtils = { }
+
+
+-- A tiny optimization.
+local EMPTY_TABLE = { }
+
+
+--[==[ =========================================================================
+# FUNCTIONS
+]==]
+
+
+--[==[ -----------------------------------------------------
+## StrUtils.starts_with
+
+```lua
+local boolean = StrUtils.starts_with( str, substr )
+```
+
+The returned value indicates whether a string starts with
+another or not.
+]==]
+
+function StrUtils.starts_with( str, substr )
+   return substr == "" or string.sub( str, 1, #substr ) == substr
+end
+
+
+--[==[ -----------------------------------------------------
+## StrUtils.ends_with
+
+```lua
+local boolean = StrUtils.ends_with( str, substr )
+```
+
+The returned value indicates whether a string ends with
+another or not.
+]==]
+
+function StrUtils.ends_with( str, substr )
+   return substr == "" or string.sub( str, -#substr ) == substr
+end
+
+
+--[==[ -----------------------------------------------------
+## StrUtils.split
+
+```lua
+local substrs = StrUtils.split( str, sep )
+local substrs = StrUtils.split( str, sep, opts )
+```
+
+Returns the substrings of a string which are separated by
+a pattern.
+
+`opts`, if provided, is a table with any number of the
+following elements:
+
+* `max`
+
+    If provided, limits the number of parts into which the
+    string can be split (not counting the separator).
+
+    Example:
+
+    ```lua
+    -- { "a", ".", "b.c" }
+    local substrs = StrUtils.split( "a.b.c", ".", { max = 2 } )
+    ```
+
+* `pattern`
+
+    If `pattern` is provided and a true value, `sep` is
+    treated as a pattern accepted by `string.find`.
+    Otherwise, `sep` is matched literally.
+
+* `discard`
+
+    If `discard` is provided and a true value, trailing
+    empty strings are removed from the returned table.
+
+* `capture`
+
+    If `capture` is provided and a true value, the
+    seperators are included in the returned table.
+
+    Example:
+
+    ```lua
+    -- { "a", ".", "b", ".", "c" }
+    local substrs = StrUtils.split( "a.b.c", ".", { capture = true } )
+    ```
+
+Splitting an empty string returns an empty table.
+
+A pattern matching zero characters results in an error.
+
+Example:
+
+```lua
+-- { "a", "b", "c" }
+local substrs = StrUtils.split( "a.b.c", "." )
+```
+]==]
+
+function StrUtils.split( str, sep, opts )
+   local len = string.len( str )
+   if len == 0 then
+      return { }
+   end
+
+   local rv = { }
+
+   opts = opts or EMPTY_TABLE
+
+   local max        = opts.max
+   local is_pattern = opts.pattern
+   local discard    = opts.discard
+   local capture    = opts.capture
+
+   local pattern = sep
+   local plain   = not is_pattern
+
+   if max then
+      max = max - 1  -- Max without the last string.
+      if capture then
+         max = max * 2  -- Max including the separators.
+      end
+   end
+
+   local i = 1
+   while i <= len and not ( max and #rv >= max ) do
+      local j, k = string.find( str, pattern, i, plain )
+      if not j then
+         break
+      end
+
+      if k < j then
+         error( "Separator pattern matched zero characters" )
+      end
+
+      table.insert( rv, string.sub( str, i, j-1 ) )
+
+      if capture then
+         table.insert( rv, string.sub( str, j, k ) )
+      end
+
+      i = k + 1
+   end
+
+   table.insert( rv, string.sub( str, i ) )
+
+   if discard then
+      while #rv > 0 and rv[ #rv ] == "" do
+         table.remove( rv )
+      end
+   end
+
+   return rv
+end
+
+
+-- ================================================================================
+
+return StrUtils

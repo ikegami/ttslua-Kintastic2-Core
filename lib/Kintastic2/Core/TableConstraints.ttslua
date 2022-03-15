@@ -1,0 +1,667 @@
+--[==[ =========================================================================
+Kintastic2.Core.TableConstraints - Restrict table accesses and changes
+======================================================================
+
+Provides a facility to help prevent coding errors by
+trapping references to the non-existent fields of a table.
+By default, such a constraint violation results in an error,
+but this can be changed (e.g. to simply print a message).
+
+It is particularly useful to make the global symbol table
+(`_G`) a fixed table, catching a multitude of typos sooner
+and with less effort.
+
+# TABLE OF CONTENTS
+
+[[TOC]]
+
+# SYNOPSIS
+
+```lua
+local TC = require( "Kintastic2.Core.TableConstraints" )
+
+--
+
+TC.use_strict()  -- Same as TC.struct( _G )
+
+local count = 123  -- ok
+print( count )     -- ok (assuming `print` exists)
+print( c0unt )     -- TRAPPED!
+
+function global_func() end                  -- TRAPPED!
+TC.global( "global_func", function() end )  -- ok
+local function func() end                   -- ok
+
+--
+
+local players = TC.const({
+   red   = 1,
+   green = 2,
+   blue  = 3,
+})
+
+local player = players.red     -- ok
+players.red = 4                -- TRAPPED!
+
+local player = players.yellow  -- TRAPPED!
+players.yellow = 5             -- TRAPPED!
+
+--
+
+local players = TC.const_lkup({
+   red   = 1,
+   green = 2,
+   blue  = 3,
+})
+
+local player = players.red     -- ok
+players.red = 4                -- TRAPPED!
+
+local player = players.yellow  -- ok
+players.yellow = 5             -- TRAPPED!
+
+--
+
+local players = TC.struct({
+   red   = 1,
+   green = 2,
+   blue  = 3,
+})
+
+local player = players.red     -- ok
+players.red = 4                -- ok
+
+local player = players.yellow  -- TRAPPED!
+players.yellow = 5             -- TRAPPED!
+
+--
+
+local players = TC.struct_lkup({
+   red   = 1,
+   green = 2,
+   blue  = 3,
+})
+
+local player = players.red     -- ok
+players.red = 4                -- ok
+
+local player = players.yellow  -- ok
+players.yellow = 5             -- TRAPPED!
+```
+]==]
+
+
+-- This module.
+local TableConstraints = { }
+
+
+--[===[ ========================================================================
+# PRIVATE FUNCTIONS
+]===]
+
+
+local hook = "__Kintastic2_Core_TableConstraints"
+
+
+local function get_constraint_type( self )
+   return ( self.is_const and "const" or "struct" ) .. ( self.is_lkup and "_lkup" or "" )
+end
+
+
+local function get_violation_msg( self, code, ctype, t, k, v  )
+   if code == "const" then
+      return "Modification of field " .. tostring( k ) .. " of " .. ctype
+   elseif code == "add" then
+      return "Addition of new field " .. tostring( k ) .. " to " .. ctype
+   else
+      return "Access of undeclared field " .. tostring( k ) .. " of " .. ctype
+   end
+end
+
+
+local function violation( self, code, t, k, v )
+   local on_violation = self.on_violation or TableConstraints.on_violation
+   if not on_violation then
+      return true
+   end
+
+   local ctype = get_constraint_type( self )
+   local msg   = get_violation_msg( self, code, ctype, t, k, v )
+
+   return on_violation( self.data, msg, code, ctype, t, k, v )
+end
+
+
+local function attach_self( tbl, is_const, is_lkup, on_violation, data )
+   local mt = getmetatable( tbl )
+   if mt then
+      error( "Can't add constraint to table with an existing metatable" )
+   end
+
+   local self = {
+      is_const     = is_const,
+      is_lkup      = is_lkup,
+      suspended    = true,
+      declared     = { },
+      constants    = is_const and { } or nil,
+      on_violation = on_violation,
+      data         = data,
+   }
+
+   local mt = { [hook] = self }
+   setmetatable( tbl, mt )
+
+   return mt, self
+end
+
+
+local function const( tbl, is_lkup, on_violation, data )
+   local mt, self = attach_self( tbl, true, is_lkup, on_violation, data )
+
+   for k, v in pairs( tbl ) do
+      self.declared[ k ] = true
+      self.constants[ k ] = v
+      tbl[ k ] = nil
+   end
+
+   if is_lkup then
+      mt.__index = function( t, k )
+         return self.constants[ k ]
+      end
+   else
+      mt.__index = function( t, k )
+         if not self.declared[ k ] and not self.suspended then
+            if not violation( self, "access", t, k ) then
+               return
+            end
+         end
+
+         return self.constants[ k ]
+      end
+   end
+
+   mt.__newindex = function( t, k, v )
+      if not self.suspended then
+         local code = self.declared[ k ] and "const" or "add"
+         if not violation( self, code, t, k, v ) then
+            return
+         end
+      end
+
+      self.declared[ k ] = true
+      self.constants[ k ] = v
+   end
+
+   mt.__pairs = function( t )
+      return pairs( self.constants )
+   end
+
+   mt.__len = function( t )
+      return #self.constants
+   end
+
+   self.suspended = false
+
+   return tbl
+end
+
+
+local function struct( tbl, is_lkup, on_violation, data )
+   local mt, self = attach_self( tbl, false, is_lkup, on_violation, data )
+
+   for k in pairs( tbl ) do
+      self.declared[ k ] = true
+   end
+
+   if not is_lkup then
+      mt.__index = function( t, k )
+         if not self.declared[ k ] and not self.suspended then
+            if not violation( self, "access", t, k ) then
+               return
+            end
+         end
+
+         return rawget( t, k )
+      end
+   end
+
+   do
+      mt.__newindex = function( t, k, v )
+         if not self.suspended and not self.declared[ k ] then
+            if not violation( self, "add", t, k, v ) then
+               return
+            end
+         end
+
+         self.declared[ k ] =  true
+         return rawset( t, k, v )
+      end
+   end
+
+   self.suspended = false
+
+   return tbl
+end
+
+
+--[==[ =========================================================================
+# STRICT MODE
+]==]
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.use_strict
+
+```lua
+TableConstraints.use_strict()
+```
+
+Prevents undeclared accesses of the global symbol table.
+
+Short for `TableConstraints.struct( _G )`.
+]==]
+
+function TableConstraints.use_strict()
+   return TableConstraints.struct( _G )
+end
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.global
+
+```lua
+TableConstraints.global( name, value )
+```
+
+Declares and sets a global symbol.
+
+Short for `TableConstraints.set( _G, name, value )`.
+]==]
+
+function TableConstraints.global( name, value )
+   return TableConstraints.set( _G, name, value )
+end
+
+
+--[==[ =========================================================================
+# CONSTRAINT-ADDING FUNCTIONS
+
+```lua
+tbl = CONSTRAINT( tbl )
+tbl = CONSTRAINT( tbl, on_violation )
+tbl = CONSTRAINT( tbl, on_violation, data )
+tbl = CONSTRAINT_if( flag, tbl )
+tbl = CONSTRAINT_if( flag, tbl, on_violation )
+tbl = CONSTRAINT_if( flag, tbl, on_violation, data )
+tbl = CONSTRAINT_r( tbl )
+tbl = CONSTRAINT_r( tbl, on_violation )
+tbl = CONSTRAINT_r( tbl, on_violation, data )
+tbl = CONSTRAINT_r_if( flag, tbl )
+tbl = CONSTRAINT_r_if( flag, tbl, on_violation )
+tbl = CONSTRAINT_r_if( flag, tbl, on_violation, data )
+```
+
+where `CONSTRAINT` is one of:
+
+* `const`
+* `const_lkup`
+* `struct`
+* `struct_lkup`
+
+These apply the constraint to the provided table, which is
+returned. See the SYNOPSIS for an example of each.
+
+The `_r` variants apply the constraint recursively.
+
+The `_if` variable do nothing if `flag` is a false value.
+
+`on_violation`, if provided, will call on a constraint
+violation. If it's not provided, `TableConstraints.on_violation`
+will be called instead. By default, it calls `error`.
+
+`data` is an opaque value provided to the constraint
+violation handler.
+
+These constraints can only be applied to tables which don't
+already have a metatable. And tables with these constraints
+added shouldn't be used as the value of another metatable's
+`__index` field.
+]==]
+
+local map = {
+   const       = { const,  false },
+   const_lkup  = { const,  true  },
+   struct      = { struct, false },
+   struct_lkup = { struct, true  },
+}
+
+for name, _ in pairs( map ) do
+   local constructor = _[1]
+   local is_lkup     = _[2]
+
+   TableConstraints[ name ] = function( tbl, on_violation, data )
+      if not TableConstraints.enabled then
+         return tbl
+      end
+
+      return constructor( tbl, is_lkup, on_violation, data )
+   end
+
+
+   TableConstraints[ name .. "_if" ] = function( flag, tbl, on_violation, data )
+      if not ( flag and TableConstraints.enabled ) then
+         return tbl
+      end
+
+      return constructor( tbl, is_lkup, on_violation, data )
+   end
+
+
+   TableConstraints[ name .. "_r" ] = function( root_tbl, on_violation, data )
+      if not TableConstraints.enabled then
+         return root_tbl
+      end
+
+      local function helper( tbl )
+         constructor( tbl, is_lkup, on_violation, data )
+
+         for k, v in pairs( tbl ) do
+            if type( v ) == "table" then
+               helper( v )
+            end
+         end
+      end
+
+      helper( root_tbl )
+
+      return root_tbl
+   end
+
+
+   TableConstraints[ name .. "_r_if" ] = function( flag, root_tbl, on_violation, data )
+      if not ( flag and TableConstraints.enabled ) then
+         return root_tbl
+      end
+
+      local function helper( tbl )
+         constructor( tbl, is_lkup, on_violation, data )
+
+         for k, v in pairs( tbl ) do
+            if type( v ) == "table" then
+               helper( v )
+            end
+         end
+      end
+
+      helper( root_tbl )
+
+      return root_tbl
+   end
+end
+
+
+--[==[ =========================================================================
+# FUNCTIONS WHICH BYPASS CONSTRAINTS
+]==]
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.declare
+
+```lua
+tbl = TableConstraints.declare( tbl, name1 )
+tbl = TableConstraints.declare( tbl, name1, name2 )
+tbl = TableConstraints.declare( tbl, name1, name2, … )
+```
+
+Declares fields of a table such that later accesses of those
+fields don't result in a `struct` or `struct_lkup`
+constraint violation.
+
+Fields that existed prior to the addition of the constraint
+need not be declared.
+
+Can't be used on a table with `const` or `const_lkup`
+constrtaint.
+
+Silently does nothing but return the table if there's no
+constraint on the table. As such, it can be used safely on a
+table passed to `CONSTRAINT_if( false, … )`.
+]==]
+
+function TableConstraints.declare( tbl, ... )
+   local mt = getmetatable( tbl )
+   local self = mt and mt[ hook ]
+   if not self then
+      return tbl
+   end
+
+   if self.is_const then
+      error( "Can't `declare` the field of a `const` table." )
+   end
+
+   local c = select( "#", ... )
+   for i = 1, c do
+      local k = select( i, ... )
+      self.declared[ k ] = true
+   end
+
+   return tbl
+end
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.set
+
+```lua
+v = TableConstraints.set( tbl, k, v )
+```
+
+Sets the value of field, *ignoring any constraint* (if any).
+
+This results in key becoming "declared".
+]==]
+
+function TableConstraints.set( tbl, k, v )
+   local mt = getmetatable( tbl )
+   local self = mt and mt[ hook ]
+   if not self then
+      tbl[ k ] = v
+      return v
+   end
+
+   self.declared[ k ] = true
+
+   if self.is_const then
+      self.constants[ k ] = v
+   else
+      tbl[ k ] = v
+   end
+
+   return v
+end
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.get
+
+```lua
+local v = TableConstraints.get( tbl, k )
+```
+
+Gets the value of field, *ignoring the constraints on the
+table* (if any).
+]==]
+
+function TableConstraints.get( tbl, k )
+   local mt = getmetatable( tbl )
+   local self = mt and mt[ hook ]
+   if not self then
+      return tbl[ k ]
+   end
+
+   if not self.declared[ k ] then
+      return nil
+   end
+
+   if self.is_const then
+      return self.constants[ k ]
+   else
+      return tbl[ k ]
+   end
+end
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.merge_into
+
+```lua
+dst_tbl = TableConstraints.merge_into( dst_tbl, src_tbl )
+```
+
+Merges `src_tbl` into `dst_tbl`, *ignoring the constraints on the
+table* (if any).
+
+Added elements become "declared".
+]==]
+
+function TableConstraints.merge_into( dst_tbl, src_tbl )
+   local mt = getmetatable( dst_tbl )
+   local self = mt and mt[ hook ]
+   if self then
+      if self.is_const then
+         for k, v in pairs( src_tbl ) do
+            self.declared[ k ] = true
+            self.constants[ k ] = v
+         end
+      else
+         for k, v in pairs( src_tbl ) do
+            self.declared[ k ] = true
+            dst_tbl[ k ] = v
+         end
+      end
+   else
+      for k, v in pairs( src_tbl ) do
+         dst_tbl[ k ] = v
+      end
+   end
+
+   return dst_tbl
+end
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.unlock
+
+```lua
+TableConstraints.unlock( tbl,
+   function( tbl )
+      …
+   end
+)
+```
+
+Calls the provided function. Constraints violations for
+table `tbl` (if any) are ignored during this call.
+]==]
+
+function TableConstraints.unlock( tbl, cb )
+   local mt = getmetatable(tbl)
+   local self = mt and mt[ hook ]
+   if not self or self.suspended then
+      return cb( tbl )
+   end
+
+   local success, rv = pcall(
+      function()
+         self.suspended = true
+         cb( tbl )
+         self.suspended = false
+      end
+   )
+
+   self.suspended = false
+
+   if success then
+      return rv
+   else
+      error( rv )
+   end
+end
+
+
+--[==[ =========================================================================
+# GLOBALS
+]==]
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.enabled
+
+```lua
+TableConstraints.enabled = boolean
+```
+
+When this variable is false, the functions which normally
+add constraints to table simply returning the provided
+table with no changes.
+
+This is useful, for example, for disabling the constraints
+in production.
+
+This has no effect on a table to which constraints have
+already been added.
+
+Defaults to `true`.
+]==]
+
+TableConstraints.enabled = true
+
+
+--[==[ -----------------------------------------------------
+## TableConstraints.on_violation
+
+```lua
+TableConstraints.on_violation = function( data, msg, code, ctype, t, k, v )
+   error( msg )
+   return false
+end
+```
+
+`TableConstraints.on_violation` is called on a constraint violation. The default
+handler calls `error`, but the user may provide a different handler. This has a
+global effect.
+
+It is provided the data attached to the table, a human-readable error message, a
+code indication the action that resulted in the violation, the type of the
+constraint type found on the table, the table itself, the key being accessed,
+and the value being assigned (if appropriate).
+
+The code is one of the following strings:
+
+- `access`, when accessing a non-existent field.
+- `const`, when attempting to modify a constant field.
+- `add`, when attempting to add a field to the table.
+
+The constraint type is one of the following strings:
+
+- `const`
+- `const_lkup`
+- `struct`
+- `struct_lkup`
+
+If the function returns a true value, the operation is permitted. It is
+otherwise prevented.
+
+If `TableConstraints.on_violation` is `nil`, the operation is permitted.
+]==]
+
+TableConstraints.on_violation = function( data, msg, code, ctype, t, k, v )
+   error( msg )
+   return false
+end
+
+
+-- =============================================================================
+
+return TableConstraints

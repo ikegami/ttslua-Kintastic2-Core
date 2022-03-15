@@ -1,0 +1,124 @@
+--[==[ =========================================================================
+Kintastic2.Core.Introspection - Introspection utils
+===================================================
+
+Provides utils related to introspection.
+
+# TABLE OF CONTENTS
+
+[[TOC]]
+
+# SYNOPSIS
+
+```lua
+local Introspection = require( "Kintastic2.Core.Introspection" )
+```
+]==]
+
+
+-- This module.
+local Introspection = { }
+
+
+--[==[ =========================================================================
+# FUNCTIONS
+]==]
+
+
+--[==[ -----------------------------------------------------
+## Introspection.get_class
+
+```lua
+local class = Introspection.get_class( x )
+```
+
+Returns the class of the argument if applicable, or `nil`
+otherwise.
+
+The class of a value is defined as the table found in the
+`__index` entry of its metatable.
+]==]
+
+function Introspection.get_class( _ )
+   if type( _ ) ~= "table" then
+      return nil
+   end
+
+   local mt = getmetatable( _ )
+   if not mt then
+      return nil
+   end
+
+   local class = mt.__index
+
+   if type( class ) ~= "table" then
+      return nil
+   end
+
+   return class
+end
+
+
+--[==[ -----------------------------------------------------
+## Introspection.is_instance_of
+
+```lua
+local boolean = Introspection.is_instance_of( x, class )
+```
+
+Returns true if the argument is the specified class, a
+subclass of it, an instance of it, or an instance of a
+subclass of it.
+
+The class of a value is defined as the table found in the
+`__index` entry of its metatable.
+]==]
+
+function Introspection.is_instance_of( _, class )
+   while _ ~= class do
+      if type( _ ) ~= "table" then
+         return false
+      end
+
+      local mt = getmetatable( _ )
+      if not mt then
+         return false
+      end
+
+      _ = mt.__index
+   end
+
+   return true
+end
+
+
+--[==[ -----------------------------------------------------
+## Introspection.is_callable
+
+```lua
+local boolean = Introspection.is_callable( x )
+```
+
+Returns true if the argument is calleable as a fucntion.
+This takes into account the `__call` metamethod.
+]==]
+
+function Introspection.is_callable(_)
+   while true do
+      local t = type( _ )
+      if t == "function" then return true  end
+      if t ~= "table"    then return false end
+
+      local mt = getmetatable( _ )
+      if not mt then
+         return false
+      end
+
+      _ = mt.__call
+   end
+end
+
+
+-- ================================================================================
+
+return Introspection

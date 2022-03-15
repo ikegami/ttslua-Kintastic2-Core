@@ -1,0 +1,49 @@
+--[==[ =========================================================================
+Kintastic2.Core.Math - Math functions
+=====================================
+
+Provides some useful math functions.
+
+# TABLE OF CONTENTS
+
+[[TOC]]
+
+# SYNOPSIS
+
+```lua
+local Math = require( "Kintastic2.Core.Math" )
+```
+]==]
+
+
+-- This module.
+local Math = { }
+
+
+--[==[ =========================================================================
+# FUNCTIONS
+]==]
+
+
+--[==[ -----------------------------------------------------
+## Math.gcd
+
+```lua
+local gcd = Math.gcd( a, b )
+```
+
+Returns the greatest common divisor of two non-negative integers.
+]==]
+
+function Math.gcd( a, b )
+   while b ~= 0 do
+      a, b = b, a % b
+   end
+
+   return math.abs( a )
+end
+
+
+-- ================================================================================
+
+return Math
